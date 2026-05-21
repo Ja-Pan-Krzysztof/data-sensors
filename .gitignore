@@ -1,0 +1,15 @@
+# Rust
+/target
+/Cargo.lock
+
+# ESP build
+/.embuild
+sdkconfig
+sdkconfig.old
+
+# JetBrains
+/.idea
+/.vscode
+
+# System
+.DS_Store
