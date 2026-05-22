@@ -34,9 +34,10 @@ display-interface-spi = "0.5.0"
 
 anyhow = "1.0.100"
 log = "0.4"
-chrono = "0.4.44"
+chrono = { version = "0.4.44", features = ["serde"]}
+dotenvy = "0.15.7"
 
-sqlx = { version = "0.9.0", features = ["runtime-tokio", "mysql"] }
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "mysql", "chrono"] }
 
 [build-dependencies]
 embuild = "0.33"

@@ -10,6 +10,7 @@ sdkconfig.old
 # JetBrains
 /.idea
 /.vscode
+/.env
 
 # System
 .DS_Store
