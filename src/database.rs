@@ -1,5 +1,5 @@
-mod starage;
+pub mod storage;
 mod models;
 mod no_models;
-mod repository;
+pub mod repository;
 

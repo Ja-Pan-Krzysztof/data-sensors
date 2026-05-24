@@ -15,6 +15,8 @@ pub struct Sensor {
     pub name: String,
     pub sensor_type: String,
     pub value: f32,
+    pub min_threshold: f32,
+    pub max_threshold: f32,
     pub updated: DateTime<Utc>,
 }
 
