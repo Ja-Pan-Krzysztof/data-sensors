@@ -6,20 +6,21 @@ use esp_idf_hal::adc::oneshot::config::{AdcChannelConfig, Calibration};
 use esp_idf_hal::adc::attenuation::DB_11;
 use esp_idf_hal::delay::Ets;
 
-use crate::config::HardwareConfig;
+use crate::config::SensorsConfig;
 
 
 pub struct SystemMonitor {
     // shared_state: Arc<Mutex<AppDatabase>>,
-    hardware: HardwareConfig,
+    hardware: SensorsConfig,
 }
 
 impl SystemMonitor {
-    pub fn new(hardware: HardwareConfig) -> Self {
+    pub fn new(hardware: SensorsConfig) -> Self {
         Self { hardware }
         // Self { shared_state, hardware }
     }
 
+    /// Temperature sensor
     fn raw_to_celsius(&self, raw_value: u16) -> Option<f32> {
         if raw_value == 0 || raw_value >= 4095 { return None }
 
@@ -42,6 +43,7 @@ impl SystemMonitor {
         Some(steinhart - 273.15)
     }
 
+    /// Light sensor
     fn raw_to_light(&self, raw_value: u16) -> f32 {
         let raw = raw_value as f32;
         let dark_adc = 150.0;
@@ -57,12 +59,14 @@ impl SystemMonitor {
         percentage
     }
 
+    /// Tilt sensor
     fn is_tilted(&self) -> bool {
         let is_tilt = self.hardware.tilt_pin.is_low();
 
         is_tilt
     }
 
+    /// Ultrasonic distance sensor
     fn measure_distance(&mut self) -> Option<f32> {
         /* Clean area */
         self.hardware.trig_pin.set_low().ok()?;
@@ -135,11 +139,31 @@ impl SystemMonitor {
                 "Tilt"
             };
 
+            // VIBRATION //
+            let mut shock_detected = false;
+            let window_start = Instant::now();
+
+            while window_start.elapsed() < Duration::from_secs(2) {
+                if self.hardware.vibration_pin.is_low() {
+                    shock_detected = true;
+                }
+            }
+
+            Ets::delay_us(50);
+
             // DISTANCE //
             match self.measure_distance() {
                 Some(dist) => println!("[DISTANCE] -> {:.2}cm", dist),
                 None => println!("[DISTANCE] -> No obstacles"),
             }
+
+            if shock_detected {
+                println!("[VIBRATION] -> True")
+            } else {
+                println!("[VIBRATION] -> None")
+            }
+
+            //
 
             if let Some(celsius) = self.raw_to_celsius(raw_temp) {
                 avg_temp.push(celsius);
@@ -151,7 +175,7 @@ impl SystemMonitor {
             println!("[LIGHT] -> {:.2}% (ADC: {})", light_percent, raw_light);
             println!("[TILT] -> {}", tilt_status);
 
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(2));
         }
     }
 }
