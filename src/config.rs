@@ -4,7 +4,7 @@ use esp_idf_hal::adc::oneshot::AdcDriver;
 use esp_idf_hal::adc::ADC1;
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_hal::spi::{self, SpiDeviceDriver, SpiDriver, SPI2};
+use esp_idf_hal::spi::{self, SpiDeviceDriver, SpiDriver, SPI2, Dma};
 
 use display_interface_spi::SPIInterface;
 use esp_idf_hal::units::Hertz;
@@ -24,21 +24,27 @@ pub struct SensorsConfig {
 
 /// Configuration pins
 impl SensorsConfig {
-    pub fn init() -> anyhow::Result<Self> {
-        let peripherals = Peripherals::take()?;
+    pub fn init(
+        adc1: ADC1,
+        temp_pin: Gpio4,
+        light_pin: Gpio5,
+        tilt_pin: Gpio6,
+        trig_pin: Gpio7,
+        echo_pin: Gpio8,
+        vibration_pin: Gpio9,
+    ) -> Result<Self> {
+        let adc_driver = AdcDriver::new(adc1)?;
+        let temp_pin = temp_pin;
+        let light_pin = light_pin;
 
-        let adc_driver = AdcDriver::new(peripherals.adc1)?;
-        let temp_pin = peripherals.pins.gpio4;
-        let light_pin = peripherals.pins.gpio5;
-
-        let mut tilt_pin = PinDriver::input(peripherals.pins.gpio6)?;
+        let mut tilt_pin = PinDriver::input(tilt_pin)?;
         tilt_pin.set_pull(Pull::Up)?;
 
-        let mut trig_pin = PinDriver::output(peripherals.pins.gpio7)?;
-        let echo_pin = PinDriver::input(peripherals.pins.gpio8)?;
+        let mut trig_pin = PinDriver::output(trig_pin)?;
+        let echo_pin = PinDriver::input(echo_pin)?;
         trig_pin.set_low()?;
         
-        let mut vibration_pin = PinDriver::input(peripherals.pins.gpio9)?;
+        let mut vibration_pin = PinDriver::input(vibration_pin)?;
         vibration_pin.set_pull(Pull::Up)?;
 
         Ok(Self {
@@ -55,24 +61,25 @@ impl SensorsConfig {
 
 pub type SpiInterfaceType = SPIInterface<
     SpiDeviceDriver<'static, SpiDriver<'static>>,
-    PinDriver<'static, Gpio14, Output>
+    PinDriver<'static, Gpio16, Output>
 >;
 pub type Screen = OledDisplay<SpiInterfaceType>;
-pub type ResetPin = PinDriver<'static, Gpio15, Output>;
+pub type ResetPin = PinDriver<'static, Gpio17, Output>;
 
 pub fn init_oled(
     spi: SPI2,
-    sclk: Gpio10,
-    sda: Gpio11,
-    sdi: Gpio12,
-    cs: Gpio13,
-    dc: Gpio14,
-    res: Gpio15,
+    sclk: Gpio1,
+    sda: Gpio2,
+    // sdi: Gpio15,
+    cs: Gpio15,
+    dc: Gpio16,
+    res: Gpio17,
 ) -> Result<(Screen, ResetPin)> {
-    let driver_config = spi::config::DriverConfig::new();
+    let driver_config = spi::config::DriverConfig::new()
+        .dma(Dma::Auto(4096));
     let device_config = spi::config::Config::new().baudrate(Hertz(4_000_000));
     let spi_device = SpiDeviceDriver::new_single(
-        spi, sclk, sda, Some(sdi), Some(cs),
+        spi, sclk, sda, None::<AnyIOPin>, Some(cs),
         &driver_config,
         &device_config,
     )?;
