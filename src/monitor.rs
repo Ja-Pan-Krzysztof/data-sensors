@@ -7,11 +7,18 @@ use esp_idf_hal::adc::attenuation::DB_11;
 use esp_idf_hal::delay::Ets;
 
 use crate::config::SensorsConfig;
+use crate::exceptions::{SensorResult, SensorCode};
 
 
 pub struct SystemMonitor {
     // shared_state: Arc<Mutex<AppDatabase>>,
     hardware: SensorsConfig,
+}
+
+impl<T> SensorResult<T> {
+    fn new(value: T, code: SensorCode) -> Self {
+        Self { value, code }
+    }
 }
 
 impl SystemMonitor {
@@ -20,9 +27,22 @@ impl SystemMonitor {
         // Self { shared_state, hardware }
     }
 
-    /// Temperature sensor
-    fn raw_to_celsius(&self, raw_value: u16) -> Option<f32> {
-        if raw_value == 0 || raw_value >= 4095 { return None }
+    /// Temperature sensos
+    /// Converts the raw ADC value from thermistor into degrees Celsius.
+    ///
+    /// # Arguments
+    /// * `raw_value` - Raw reading from ADC1 converter (1 - 4095)
+    ///
+    /// # Returns
+    /// * (`value` and `status code`)
+    fn raw_to_celsius(&self, raw_value: u16) -> SensorResult<f32> {
+        if raw_value >= 4095 {
+            return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh)
+        }
+
+        if raw_value == 0 {
+            return SensorResult::new(raw_value as f32, SensorCode::GpioError)
+        }
 
         const SENSITIVITY_B: f32 = 4000.0;
         const ROOM_TEMP_KELVIN: f32 = 298.15;
@@ -32,54 +52,89 @@ impl SystemMonitor {
         let calibration_factor = 13150.0;
         let resistance = calibration_factor * (( 4095.0 - raw) / raw);
 
-        if resistance <= 0.1 { return None }
+        if resistance <= 0.1 {
+            return SensorResult::new(resistance, SensorCode::GpioError)
+        }
 
+        /* Use steinhart equation */
         let mut steinhart = resistance / THERMISTOR_ROOM_RESISTANCE;
         steinhart = steinhart.ln();
         steinhart /= SENSITIVITY_B;
         steinhart += 1.0 / ROOM_TEMP_KELVIN;
         steinhart = 1.0 / steinhart;
 
-        Some(steinhart - 273.15)
+        SensorResult::new(steinhart - 273.15, SensorCode::Ok)
     }
 
     /// Light sensor
-    fn raw_to_light(&self, raw_value: u16) -> f32 {
+    /// Converts the raw ADC value from photoresistor into percentages of light.
+    ///
+    /// # Arguments
+    /// `raw_value` - Raw reading from ADC1 converter.
+    ///
+    /// # Returns
+    /// (`percentage` and `status code`)
+    fn raw_to_light(&self, raw_value: u16) -> SensorResult<f32> {
         let raw = raw_value as f32;
         let dark_adc = 150.0;
         let light_adc = 3192.0;
 
-        if (light_adc - dark_adc) < 1.0 { return 0.0 }
+        if (light_adc - dark_adc) < 1.0 {
+            return SensorResult::new(0.0, SensorCode::BadCalibration)
+        }
+
+        if raw_value > 4000 {
+            return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh)
+        }
 
         let mut percentage = ((raw - dark_adc) / (light_adc - dark_adc)) * 100.0;
 
         if percentage > 100.0 { percentage = 100.0; }
         if percentage < 0.0 { percentage = 0.0; }
 
-        percentage
+        SensorResult::new(percentage, SensorCode::Ok)
     }
 
     /// Tilt sensor
-    fn is_tilted(&self) -> bool {
+    /// Detects shocks
+    ///
+    /// # Returns
+    /// `true` or `false` if detects anything
+    fn is_tilted(&self) -> SensorResult<bool> {
         let is_tilt = self.hardware.tilt_pin.is_low();
 
-        is_tilt
+        SensorResult::new(is_tilt, SensorCode::Ok)
     }
 
     /// Ultrasonic distance sensor
-    fn measure_distance(&mut self) -> Option<f32> {
+    /// Measures distance to objects up to 4 metres. Time taken for sound to
+    /// be sent and received is converted into centimetres.
+    ///
+    /// # Returns
+    /// `distance` in sentimetres
+    fn measure_distance(&mut self) -> SensorResult<f32> {
         /* Clean area */
-        self.hardware.trig_pin.set_low().ok()?;
+        if self.hardware.trig_pin.set_low().is_err() {
+            return SensorResult::new(0.0, SensorCode::GpioError)
+        }
+
         Ets::delay_us(2);
-        self.hardware.trig_pin.set_high().ok()?;
+        if self.hardware.trig_pin.set_high().is_err() {
+            return SensorResult::new(0.0, SensorCode::GpioError)
+        }
+
         Ets::delay_us(10);
-        self.hardware.trig_pin.set_low().ok()?;
+        if self.hardware.trig_pin.set_low().is_err() {
+            return SensorResult::new(0.0, SensorCode::GpioError)
+        }
 
         let mut timeout = 0;
         while self.hardware.echo_pin.is_low() {
             Ets::delay_us(1);
             timeout += 1;
-            if timeout > 10000 { return None }; // Echo sensor does not work
+            if timeout > 10000 {
+                return SensorResult::new(0.0, SensorCode::HardwareTimeout) // Echo sensor does not work
+            }
         }
 
         let start_time = Instant::now();
@@ -89,7 +144,9 @@ impl SystemMonitor {
         while self.hardware.echo_pin.is_high() {
             Ets::delay_us(1);
             timeout += 1;
-            if timeout > 25000 { return None; } // No obstacles ( 4 metre radius )
+            if timeout > 25000 {
+                return SensorResult::new(0.0, SensorCode::EchoTimeout) // No obstacles ( 4 metre radius )
+            }
         }
 
         /* duration time */
@@ -99,10 +156,10 @@ impl SystemMonitor {
         /* distance */
         let distance_cm = (duration_us * 0.0343) / 2.0;
 
-        Some(distance_cm)
+        SensorResult::new(distance_cm, SensorCode::Ok)
     }
 
-    pub fn start_monitor(&mut self) -> anyhow::Result<()> {
+    /*pub fn start_monitor(&mut self) -> anyhow::Result<()> {
         let mut channel_config = AdcChannelConfig::new();
         channel_config.attenuation = DB_11;
         channel_config.calibration = Calibration::Curve;
@@ -168,7 +225,6 @@ impl SystemMonitor {
             if let Some(celsius) = self.raw_to_celsius(raw_temp) {
                 avg_temp.push(celsius);
                 let last_5_values: f32 = avg_temp.iter().rev().take(5).copied().sum::<f32>() / 5.0;
-                // todo: dodać usuwanie starych liczb
                 println!("[TEMP] -> {:.2}°C (ADC: {}) <Avarage: {:.2}>", celsius, raw_temp, last_5_values);
             }
             let light_percent = self.raw_to_light(raw_light);
@@ -177,5 +233,5 @@ impl SystemMonitor {
 
             thread::sleep(Duration::from_secs(2));
         }
-    }
+    }*/
 }

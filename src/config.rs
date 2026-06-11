@@ -3,15 +3,16 @@ use anyhow::Result;
 use esp_idf_hal::adc::oneshot::AdcDriver;
 use esp_idf_hal::adc::ADC1;
 use esp_idf_hal::gpio::*;
-use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::spi::{self, SpiDeviceDriver, SpiDriver, SPI2, Dma};
 
 use display_interface_spi::SPIInterface;
 use esp_idf_hal::units::Hertz;
+
 use crate::oled::OledDisplay;
+use crate::exceptions::OledErorr;
 
 
-/// Declarate pins
+/// Assigning pins to specyfic sensors
 pub struct SensorsConfig {
     pub adc_driver: AdcDriver<'static, ADC1>,
     pub temp_pin: Gpio4,
@@ -59,6 +60,7 @@ impl SensorsConfig {
     }
 }
 
+/// Screen config
 pub type SpiInterfaceType = SPIInterface<
     SpiDeviceDriver<'static, SpiDriver<'static>>,
     PinDriver<'static, Gpio16, Output>
@@ -66,6 +68,7 @@ pub type SpiInterfaceType = SPIInterface<
 pub type Screen = OledDisplay<SpiInterfaceType>;
 pub type ResetPin = PinDriver<'static, Gpio17, Output>;
 
+/// Create instance of screen
 pub fn init_oled(
     spi: SPI2,
     sclk: Gpio1,
@@ -88,7 +91,8 @@ pub fn init_oled(
     let dc = PinDriver::output(dc)?;
 
     let interface = SPIInterface::new(spi_device, dc);
-    let screen = OledDisplay::new(interface, &mut res)?;
+    let screen = OledDisplay::new(interface, &mut res)
+        .map_err(|e| anyhow::anyhow!("[OLED CONFING ERROR] -> Init error: {:?}", e))?;
 
     Ok((screen, res))
 }

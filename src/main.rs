@@ -2,6 +2,7 @@ mod database;
 mod config;
 mod monitor;
 mod oled;
+mod exceptions;
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -43,19 +44,19 @@ fn main() -> anyhow::Result<()> {
     )?;
     let mut monitor = SystemMonitor::new(hardware);
     
-    thread::spawn(move || {
-        if let Err(e) = monitor.start_monitor() {
-            println!("[ERROR] start monitor error: {:?}", e);
-        }
-    });
+    // thread::spawn(move || {
+    //     if let Err(e) = monitor.start_monitor() {
+    //         println!("[ERROR] start monitor error: {:?}", e);
+    //     }
+    // });
 
     let shared_oled: Arc<Mutex<Screen>> = Arc::new(Mutex::new(oled));
 
     loop {
         if let Ok(mut display) = shared_oled.lock() {
-            display.clear()?;
-            display.show_text("hello", 5, 20)?;
-            display.refresh()?;
+            if let Err(e) = display.clear() { println!("[OLED ERROR] -> Clean failed: {:?}", e); }
+            if let Err(e) = display.show_text("hello", 5, 20) { println!("[OLED ERROR] -> Draw failed: {:?}", e); }
+            if let Err(e) = display.refresh() { println!("[OLED ERROR] -> Refresh failed: {:?}", e); }
         } else {
             println!("[ERROR] -> Mutex cannot lock screen")
         }
