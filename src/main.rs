@@ -3,10 +3,13 @@ mod config;
 mod monitor;
 mod oled;
 mod exceptions;
+mod website;
+mod network;
 
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use std::env;
 use anyhow;
 
 use esp_idf_hal::prelude::Peripherals;
@@ -18,6 +21,7 @@ use crate::monitor::SystemMonitor;
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
     esp_idf_hal::sys::link_patches();
+
     let peripherals = Peripherals::take()?;
 
     let (oled, _res) = config::init_oled(
@@ -42,6 +46,16 @@ fn main() -> anyhow::Result<()> {
         peripherals.pins.gpio8,
         peripherals.pins.gpio9,
     )?;
+
+    let shared_oled: Arc<Mutex<Screen>> = Arc::new(Mutex::new(oled));
+
+    let (wifi, _server) = network::run_server(
+        peripherals.modem,
+        env!("SSID"),
+        env!("PASSWORD"),
+        shared_oled.clone(),
+    )?;
+
     let mut monitor = SystemMonitor::new(hardware);
     
     // thread::spawn(move || {
@@ -49,8 +63,6 @@ fn main() -> anyhow::Result<()> {
     //         println!("[ERROR] start monitor error: {:?}", e);
     //     }
     // });
-
-    let shared_oled: Arc<Mutex<Screen>> = Arc::new(Mutex::new(oled));
 
     loop {
         if let Ok(mut display) = shared_oled.lock() {

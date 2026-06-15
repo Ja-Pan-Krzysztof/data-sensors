@@ -18,6 +18,7 @@ pub struct SensorResult<T> {
     pub code: SensorCode,
 }
 
+/* Oled exceptions */
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum OledErorr {
     ResetLinefailed,
