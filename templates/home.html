@@ -2,9 +2,28 @@
 <html lang="en">
 <head>
    <meta charset="UTF-8">
-   <title>Title</title>
+   <title>Dashboard</title>
+   <link rel="stylesheet" href="/styles/style.css">
+   <script src="/scripts/script.js"></script>
 </head>
 <body>
-<h1>WORK</h1>
+   <div class="container">
+      <h2>Sensor Control Panel</h2>
+      <table>
+         <thead>
+         <tr>
+            <th>Devide parameter</th>
+            <th>Current value</th>
+         </tr>
+         </thead>
+         <tbody>
+            <tr><td>Temperature</td><td id="temp">---</td></tr>
+            <tr><td>Light level</td><td id="light">---</td></tr>
+            <tr><td>Tilt status</td><td id="tilt">---</td></tr>
+            <tr><td>Detected vibrations</td><td id="vibe">---</td></tr>
+            <tr><td>Sonar range</td><td id="dist">---</td></tr>
+         </tbody>
+      </table>
+   </div>
 </body>
 </html>

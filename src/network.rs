@@ -19,7 +19,8 @@ use esp_idf_svc::{
 
 use std::sync::{Arc, Mutex};
 use std::default::Default;
-use crate::config::Screen;
+
+use crate::config::{LiveMeasurements, Screen};
 
 pub type Wifi = BlockingWifi<EspWifi<'static>>;
 pub type Server = EspHttpServer<'static>;
@@ -30,6 +31,7 @@ pub fn run_server(
     ssid: &str,
     pass: &str,
     shared_oled: Arc<Mutex<Screen>>,
+    shared_data: Arc<Mutex<LiveMeasurements>>,
 ) -> Result<(Wifi, Server)> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
@@ -67,17 +69,12 @@ pub fn run_server(
 
         match wifi.connect() {
             Ok(_) => {
-                if wifi.wait_netif_up().is_ok() {
-                    break;
+                match wifi.wait_netif_up() {
+                    Ok(_) => break,
+                    Err(wifi_err) => println!("Cannot get IP address from router DHCP: {:?}", wifi_err),
                 }
-
-                else {
-                    println!("Cannot get IP address from router DHCP");  // TODO: exception
-                }
-            }
-            Err(esp_err) => {
-                println!("Cannot connect to your WiFi: {:?}", esp_err);
-            }
+            },
+            Err(esp_err) => println!("Cannot connect to your WiFi: {:?}", esp_err),
         }
 
         let _ = wifi.disconnect();
@@ -105,7 +102,7 @@ pub fn run_server(
 
     let mut server = EspHttpServer::new(&HttpServerConfig::default())?;
 
-    crate::website::urls::load_urls(&mut server)?;
+    crate::website::urls::load_urls(&mut server, shared_data.clone())?;
 
     Ok((wifi, server))
 }

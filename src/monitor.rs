@@ -1,18 +1,22 @@
+use anyhow::Result;
+
 use std::thread;
 use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
 
 use esp_idf_hal::adc::oneshot::AdcChannelDriver;
 use esp_idf_hal::adc::oneshot::config::{AdcChannelConfig, Calibration};
 use esp_idf_hal::adc::attenuation::DB_11;
-use esp_idf_hal::delay::Ets;
+use esp_idf_hal::delay::{Ets, FreeRtos};
 
-use crate::config::SensorsConfig;
+use crate::config::{SensorsConfig, LiveMeasurements};
 use crate::exceptions::{SensorResult, SensorCode};
 
 
 pub struct SystemMonitor {
     // shared_state: Arc<Mutex<AppDatabase>>,
     hardware: SensorsConfig,
+    shared_data: Arc<Mutex<LiveMeasurements>>,
 }
 
 impl<T> SensorResult<T> {
@@ -22,8 +26,8 @@ impl<T> SensorResult<T> {
 }
 
 impl SystemMonitor {
-    pub fn new(hardware: SensorsConfig) -> Self {
-        Self { hardware }
+    pub fn new(hardware: SensorsConfig, shared_data: Arc<Mutex<LiveMeasurements>>) -> Self {
+        Self { hardware, shared_data }
         // Self { shared_state, hardware }
     }
 
@@ -159,79 +163,67 @@ impl SystemMonitor {
         SensorResult::new(distance_cm, SensorCode::Ok)
     }
 
-    /*pub fn start_monitor(&mut self) -> anyhow::Result<()> {
+    pub fn start_monitor(&mut self) -> Result<()> {
         let mut channel_config = AdcChannelConfig::new();
         channel_config.attenuation = DB_11;
         channel_config.calibration = Calibration::Curve;
 
-        let mut avg_temp: Vec<f32> = vec![1.0, 1.0, 1.0, 1.0, 1.0];
+        let mut last_send_time = Instant::now();
+        let mut shock_detected = false;
 
         loop {
-            // TEMP //
-            let raw_temp = {
-                let mut temp_channel = AdcChannelDriver::new(
-                    &self.hardware.adc_driver,
-                    &mut self.hardware.temp_pin,
-                    &channel_config,
-                )?;
+            if self.hardware.vibration_pin.is_low() {
+                shock_detected = true;
+            }
 
-                temp_channel.read()?
-            };
+            if last_send_time.elapsed() >= Duration::from_secs(2) {
 
-            // LIGHT //
-            let raw_light = {
+                // TEMP
+                let raw_temp = {
+                    let mut temp_channel = AdcChannelDriver::new(
+                        &self.hardware.adc_driver,
+                        &mut self.hardware.temp_pin,
+                        &channel_config,
+                    )?;
+                    temp_channel.read()?
+                };
+                let temp_result = self.raw_to_celsius(raw_temp);
+                let temp_celsius = if temp_result.code == SensorCode::Ok { temp_result.value } else { 0.0 };
+
+                // LIGHT
+                let raw_light = {
                     let mut light_channel = AdcChannelDriver::new(
                         &self.hardware.adc_driver,
                         &mut self.hardware.light_pin,
                         &channel_config,
                     )?;
-
                     light_channel.read()?
                 };
+                let light_percent = self.raw_to_light(raw_light);
+                let light_percent_val = if light_percent.code == SensorCode::Ok { light_percent.value } else { 0.0 };
 
-            // TILT //
-            let tilt_status = if self.is_tilted() {
-                "Stable"
-            } else {
-                "Tilt"
-            };
+                // TILT
+                let tilt_status_bool = self.hardware.tilt_pin.is_low();
 
-            // VIBRATION //
-            let mut shock_detected = false;
-            let window_start = Instant::now();
+                // DISTANCE
+                let dist_result = self.measure_distance();
+                let distance_cm = if dist_result.code == SensorCode::Ok { dist_result.value } else { -1.0 };
 
-            while window_start.elapsed() < Duration::from_secs(2) {
-                if self.hardware.vibration_pin.is_low() {
-                    shock_detected = true;
+                // Save data to send
+                if let Ok(mut data) = self.shared_data.lock() {
+                    data.temperature = temp_celsius;
+                    data.light_percent = light_percent_val;
+                    data.is_tilted = !tilt_status_bool;
+                    data.shock_detected = shock_detected; // Zapisujemy status wstrząsów z całych 2 sekund
+                    data.distance_cm = distance_cm;
                 }
+
+                // Reset counters to 2 sec
+                shock_detected = false;
+                last_send_time = Instant::now();
             }
 
-            Ets::delay_us(50);
-
-            // DISTANCE //
-            match self.measure_distance() {
-                Some(dist) => println!("[DISTANCE] -> {:.2}cm", dist),
-                None => println!("[DISTANCE] -> No obstacles"),
-            }
-
-            if shock_detected {
-                println!("[VIBRATION] -> True")
-            } else {
-                println!("[VIBRATION] -> None")
-            }
-
-            //
-
-            if let Some(celsius) = self.raw_to_celsius(raw_temp) {
-                avg_temp.push(celsius);
-                let last_5_values: f32 = avg_temp.iter().rev().take(5).copied().sum::<f32>() / 5.0;
-                println!("[TEMP] -> {:.2}°C (ADC: {}) <Avarage: {:.2}>", celsius, raw_temp, last_5_values);
-            }
-            let light_percent = self.raw_to_light(raw_light);
-            println!("[LIGHT] -> {:.2}% (ADC: {})", light_percent, raw_light);
-            println!("[TILT] -> {}", tilt_status);
-
-            thread::sleep(Duration::from_secs(2));
+            FreeRtos::delay_ms(10);
         }
-    }*/
+    }
 }

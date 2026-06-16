@@ -96,3 +96,25 @@ pub fn init_oled(
 
     Ok((screen, res))
 }
+
+/// Data structure used to display content on website
+#[derive(Debug, Clone, Copy)]
+pub struct LiveMeasurements {
+    pub temperature: f32,
+    pub light_percent: f32,
+    pub is_tilted: bool,
+    pub shock_detected: bool,
+    pub distance_cm: f32,
+}
+
+impl Default for LiveMeasurements {
+    fn default() -> Self {
+        Self {
+            temperature: 0.0,
+            light_percent: 0.0,
+            is_tilted: false,
+            shock_detected: false,
+            distance_cm: -1.0,
+        }
+    }
+}

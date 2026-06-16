@@ -14,7 +14,7 @@ use anyhow;
 
 use esp_idf_hal::prelude::Peripherals;
 
-use crate::config::{Screen, SensorsConfig};
+use crate::config::{LiveMeasurements, Screen, SensorsConfig};
 use crate::database::storage::init_storage;
 use crate::monitor::SystemMonitor;
 
@@ -48,26 +48,28 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let shared_oled: Arc<Mutex<Screen>> = Arc::new(Mutex::new(oled));
+    let shared_data: Arc<Mutex<LiveMeasurements>> = Arc::new(Mutex::new(LiveMeasurements::default()));
 
     let (wifi, _server) = network::run_server(
         peripherals.modem,
         env!("SSID"),
         env!("PASSWORD"),
         shared_oled.clone(),
+        shared_data.clone(),
     )?;
 
-    let mut monitor = SystemMonitor::new(hardware);
+    let mut monitor = SystemMonitor::new(hardware, shared_data);
     
-    // thread::spawn(move || {
-    //     if let Err(e) = monitor.start_monitor() {
-    //         println!("[ERROR] start monitor error: {:?}", e);
-    //     }
-    // });
+    thread::spawn(move || {
+        if let Err(e) = monitor.start_monitor() {
+            println!("[ERROR] start monitor error: {:?}", e);
+        }
+    });
 
     loop {
         if let Ok(mut display) = shared_oled.lock() {
             if let Err(e) = display.clear() { println!("[OLED ERROR] -> Clean failed: {:?}", e); }
-            if let Err(e) = display.show_text("hello", 5, 20) { println!("[OLED ERROR] -> Draw failed: {:?}", e); }
+            if let Err(e) = display.show_text("Working", 5, 20) { println!("[OLED ERROR] -> Draw failed: {:?}", e); }
             if let Err(e) = display.refresh() { println!("[OLED ERROR] -> Refresh failed: {:?}", e); }
         } else {
             println!("[ERROR] -> Mutex cannot lock screen")
