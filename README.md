@@ -4,9 +4,9 @@
 
 ### ESP32-S3 Multi-Sensor Monitoring System in Rust
 
-Projekt realizuje jednoczesny, bezpieczny wątkowo odczyt danych 
-z zestawu czujników środowiskowych i mechanicznych, a następnie 
-zapisuje w BD (`coming soon`) oraz prezentuje je w panelu HMI 
+The project enables the simultaneous, thread-safe reading of data
+from a set of environmental and mechanical sensors, and then
+saves it to a database (`coming soon`) and displays it on the HMI panel
 (`coming soon`).
 
 ## 🛠️ Hardware Specifications
@@ -28,3 +28,6 @@ zapisuje w BD (`coming soon`) oraz prezentuje je w panelu HMI
 | **Ekran OLED SSD1306**                   | CS             | **GPIO 15** | SPI2 Hardware (Chip Select)   |
 | **Ekran OLED SSD1306**                   | DC             | **GPIO 16** | Digital Output (Data/Command) |
 | **Ekran OLED SSD1306**                   | RES            | **GPIO 17** | Digital Output (Reset)        |
+
+## Control Panel
+![control_panel.png](images/control_panel.png)
