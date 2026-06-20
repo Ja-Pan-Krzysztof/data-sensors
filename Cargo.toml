@@ -12,10 +12,14 @@ harness = false # do not use the built-in cargo test harness -> resolve rust-ana
 
 [profile.release]
 opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = true
 
 [profile.dev]
 debug = true    # Symbols are nice, and they don't increase the size on Flash
-opt-level = "z"
+opt-level = 2
+incremental = false
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"]}
@@ -35,9 +39,6 @@ display-interface-spi = "0.5.0"
 anyhow = "1.0.100"
 log = "0.4"
 chrono = { version = "0.4.44", features = ["serde"]}
-dotenvy = "0.15.7"
-
-sqlx = { version = "0.9.0", features = ["runtime-tokio", "mysql", "chrono"] }
 
 [build-dependencies]
 embuild = "0.33"

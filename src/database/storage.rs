@@ -1,13 +1,16 @@
+use anyhow::Result;
+
 use std::{fs, env};
 use std::path::Path;
 use chrono::Utc;
+
 use crate::database::models::*;
 
 
-pub fn init_storage(file_path: &str) -> anyhow::Result<()> {
-    if Path::new(file_path).exists() {
-        return Ok(())
-    }
+pub fn init_storage() -> Result<AppDatabase> {
+    // if Path::new(file_path).exists() {
+    //     return Ok(())
+    // }
     
     let default_db = AppDatabase {
         network: Network {
@@ -25,9 +28,9 @@ pub fn init_storage(file_path: &str) -> anyhow::Result<()> {
         ],
         alarm: Vec::new(),
     };
+    //
+    // let serialized = serde_json::to_string_pretty(&default_db)?;
+    // fs::write(file_path, serialized)?;
     
-    let serialized = serde_json::to_string_pretty(&default_db)?;
-    fs::write(file_path, serialized)?;
-    
-    Ok(())
+    Ok(default_db)
 }

@@ -10,13 +10,14 @@ use esp_idf_hal::adc::attenuation::DB_11;
 use esp_idf_hal::delay::{Ets, FreeRtos};
 
 use crate::config::{SensorsConfig, LiveMeasurements};
+use crate::database::repository::SensorRepository;
 use crate::exceptions::{SensorResult, SensorCode};
 
 
 pub struct SystemMonitor {
-    // shared_state: Arc<Mutex<AppDatabase>>,
     hardware: SensorsConfig,
     shared_data: Arc<Mutex<LiveMeasurements>>,
+    db_repository: SensorRepository,
 }
 
 impl<T> SensorResult<T> {
@@ -26,8 +27,12 @@ impl<T> SensorResult<T> {
 }
 
 impl SystemMonitor {
-    pub fn new(hardware: SensorsConfig, shared_data: Arc<Mutex<LiveMeasurements>>) -> Self {
-        Self { hardware, shared_data }
+    pub fn new(
+        hardware: SensorsConfig,
+        shared_data: Arc<Mutex<LiveMeasurements>>,
+        db_repository: SensorRepository,
+    ) -> Self {
+        Self { hardware, shared_data, db_repository }
         // Self { shared_state, hardware }
     }
 
@@ -170,13 +175,13 @@ impl SystemMonitor {
 
         let mut last_send_time = Instant::now();
         let mut shock_detected = false;
-
+        
         loop {
             if self.hardware.vibration_pin.is_low() {
                 shock_detected = true;
             }
 
-            if last_send_time.elapsed() >= Duration::from_secs(2) {
+            if last_send_time.elapsed() >= Duration::from_secs(1) {
 
                 // TEMP
                 let raw_temp = {
@@ -188,7 +193,7 @@ impl SystemMonitor {
                     temp_channel.read()?
                 };
                 let temp_result = self.raw_to_celsius(raw_temp);
-                let temp_celsius = if temp_result.code == SensorCode::Ok { temp_result.value } else { 0.0 };
+                let temp_celsius: f32 = if temp_result.code == SensorCode::Ok { temp_result.value } else { 0.0 };
 
                 // LIGHT
                 let raw_light = {
@@ -217,6 +222,23 @@ impl SystemMonitor {
                     data.shock_detected = shock_detected; // Zapisujemy status wstrząsów z całych 2 sekund
                     data.distance_cm = distance_cm;
                 }
+
+                let tilt_var: f32 = if tilt_status_bool { 0.0 } else { 1.0 };
+                let vibe_var: f32 = if shock_detected { 1.0 } else { 0.0 };
+
+                let _ = self.db_repository.update_all_sensors_batch(
+                    temp_celsius,
+                    light_percent_val,
+                    tilt_var,
+                    vibe_var,
+                    distance_cm,
+
+                );
+
+                println!(
+                    "{{\"temp\":{:.2},\"light\":{:.2},\"tilted\":{},\"shock\":{},\"dist\":{:.1}}}",
+                    temp_celsius, light_percent_val, !tilt_status_bool, shock_detected, distance_cm
+                );
 
                 // Reset counters to 2 sec
                 shock_detected = false;
