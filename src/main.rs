@@ -37,7 +37,6 @@ fn main() -> Result<()> {
         peripherals.pins.gpio17,
     )?;
     
-    let db_path = "spiffs/db.json";
     if let Err(e) = init_storage() {
         println!("[DISK ERROR] -> Unable to init file: {:?}", e)
     }
@@ -55,7 +54,7 @@ fn main() -> Result<()> {
     let shared_oled: Arc<Mutex<Screen>> = Arc::new(Mutex::new(oled));
     let shared_data: Arc<Mutex<LiveMeasurements>> = Arc::new(Mutex::new(LiveMeasurements::default()));
     let default_db = init_storage()?;
-    let db_repository = SensorRepository::new(default_db);
+    let db_repository = Arc::new(SensorRepository::new(default_db));
 
     let (wifi, _server) = network::run_server(
         peripherals.modem,
@@ -63,9 +62,10 @@ fn main() -> Result<()> {
         env!("PASSWORD"),
         shared_oled.clone(),
         shared_data.clone(),
+        db_repository.clone(),
     )?;
 
-    let mut monitor = SystemMonitor::new(hardware, shared_data, db_repository);
+    let mut monitor = SystemMonitor::new(hardware, shared_data.clone(), db_repository.clone());
     
     thread::Builder::new()
         .name("sensor_monitor_thread".to_string())
@@ -80,7 +80,7 @@ fn main() -> Result<()> {
     loop {
         if let Ok(mut display) = shared_oled.lock() {
             if let Err(e) = display.clear() { println!("[OLED ERROR] -> Clean failed: {:?}", e); }
-            if let Err(e) = display.show_text("Working", 5, 20) { println!("[OLED ERROR] -> Draw failed: {:?}", e); }
+            if let Err(e) = display.show_text(&format!("{:?}", wifi.wifi().sta_netif().get_ip_info()?.ip), 5, 10) { println!("[OLED ERROR] -> Draw failed: {:?}", e); }
             if let Err(e) = display.refresh() { println!("[OLED ERROR] -> Refresh failed: {:?}", e); }
         } else {
             println!("[ERROR] -> Mutex cannot lock screen")

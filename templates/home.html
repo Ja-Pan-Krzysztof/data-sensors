@@ -4,7 +4,6 @@
    <meta charset="UTF-8">
    <title>Dashboard</title>
    <link rel="stylesheet" href="/styles/style.css">
-   <script src="/scripts/script.js"></script>
 </head>
 <body>
    <div class="container">
@@ -14,16 +13,19 @@
          <tr>
             <th>Devide parameter</th>
             <th>Current value</th>
+            <th>Min value</th>
+            <th>Max value</th>
+            <th>Status</th>
          </tr>
          </thead>
-         <tbody>
-            <tr><td>Temperature</td><td id="temp">---</td></tr>
-            <tr><td>Light level</td><td id="light">---</td></tr>
-            <tr><td>Tilt status</td><td id="tilt">---</td></tr>
-            <tr><td>Detected vibrations</td><td id="vibe">---</td></tr>
-            <tr><td>Sonar range</td><td id="dist">---</td></tr>
-         </tbody>
+         <tbody id="home-table-body"></tbody>
       </table>
+
+      <div class="actions">
+         <button onclick="window.location.href='/settings'" class="btn">Settings</button>
+      </div>
    </div>
+
+   <script src="/scripts/script.js"></script>
 </body>
 </html>

@@ -19,11 +19,21 @@ use esp_idf_svc::{
 
 use std::sync::{Arc, Mutex};
 use std::default::Default;
+use serde::Deserialize;
 
 use crate::config::{LiveMeasurements, Screen};
+use crate::database::repository::SensorRepository;
 
 pub type Wifi = BlockingWifi<EspWifi<'static>>;
 pub type Server = EspHttpServer<'static>;
+
+
+#[derive(Deserialize)]
+pub struct SettingsUpdate {
+    pub sensor_id: i32,
+    pub min_val: f32,
+    pub max_val: f32
+}
 
 
 pub fn run_server(
@@ -32,6 +42,7 @@ pub fn run_server(
     pass: &str,
     shared_oled: Arc<Mutex<Screen>>,
     shared_data: Arc<Mutex<LiveMeasurements>>,
+    db_repository: Arc<SensorRepository>
 ) -> Result<(Wifi, Server)> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
@@ -102,7 +113,7 @@ pub fn run_server(
 
     let mut server = EspHttpServer::new(&HttpServerConfig::default())?;
 
-    crate::website::urls::load_urls(&mut server, shared_data.clone())?;
+    crate::website::urls::load_urls(&mut server, shared_data.clone(), db_repository.clone())?;
 
     Ok((wifi, server))
 }

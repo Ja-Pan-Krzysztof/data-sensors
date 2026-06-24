@@ -9,6 +9,8 @@ use esp_idf_hal::adc::oneshot::config::{AdcChannelConfig, Calibration};
 use esp_idf_hal::adc::attenuation::DB_11;
 use esp_idf_hal::delay::{Ets, FreeRtos};
 
+use embedded_hal::digital::v2::OutputPin as _;
+
 use crate::config::{SensorsConfig, LiveMeasurements};
 use crate::database::repository::SensorRepository;
 use crate::exceptions::{SensorResult, SensorCode};
@@ -17,7 +19,7 @@ use crate::exceptions::{SensorResult, SensorCode};
 pub struct SystemMonitor {
     hardware: SensorsConfig,
     shared_data: Arc<Mutex<LiveMeasurements>>,
-    db_repository: SensorRepository,
+    db_repository: Arc<SensorRepository>,
 }
 
 impl<T> SensorResult<T> {
@@ -30,10 +32,9 @@ impl SystemMonitor {
     pub fn new(
         hardware: SensorsConfig,
         shared_data: Arc<Mutex<LiveMeasurements>>,
-        db_repository: SensorRepository,
+        db_repository: Arc<SensorRepository>,
     ) -> Self {
         Self { hardware, shared_data, db_repository }
-        // Self { shared_state, hardware }
     }
 
     /// Temperature sensos
@@ -44,7 +45,7 @@ impl SystemMonitor {
     ///
     /// # Returns
     /// * (`value` and `status code`)
-    fn raw_to_celsius(&self, raw_value: u16) -> SensorResult<f32> {
+    fn raw_to_celsius(raw_value: u16) -> SensorResult<f32> {
         if raw_value >= 4095 {
             return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh)
         }
@@ -83,7 +84,7 @@ impl SystemMonitor {
     ///
     /// # Returns
     /// (`percentage` and `status code`)
-    fn raw_to_light(&self, raw_value: u16) -> SensorResult<f32> {
+    fn raw_to_light(raw_value: u16) -> SensorResult<f32> {
         let raw = raw_value as f32;
         let dark_adc = 150.0;
         let light_adc = 3192.0;
@@ -137,30 +138,23 @@ impl SystemMonitor {
             return SensorResult::new(0.0, SensorCode::GpioError)
         }
 
-        let mut timeout = 0;
+        let wait_time = Instant::now();
         while self.hardware.echo_pin.is_low() {
-            Ets::delay_us(1);
-            timeout += 1;
-            if timeout > 10000 {
-                return SensorResult::new(0.0, SensorCode::HardwareTimeout) // Echo sensor does not work
+            if wait_time.elapsed().as_micros() > 10000 {
+                return SensorResult::new(400.0, SensorCode::HardwareTimeout);
             }
         }
 
-        let start_time = Instant::now();
-
-        /* Waiting for sound to come back  */
-        timeout = 0;
+        /* Waiting for sound to come back */
+        let echo_start = Instant::now();
         while self.hardware.echo_pin.is_high() {
-            Ets::delay_us(1);
-            timeout += 1;
-            if timeout > 25000 {
-                return SensorResult::new(0.0, SensorCode::EchoTimeout) // No obstacles ( 4 metre radius )
+            if echo_start.elapsed().as_micros() > 25000 {
+                return SensorResult::new(400.0, SensorCode::EchoTimeout);
             }
         }
 
         /* duration time */
-        let duration = start_time.elapsed();
-        let duration_us = duration.as_micros() as f32;
+        let duration_us = echo_start.elapsed().as_micros() as f32;
 
         /* distance */
         let distance_cm = (duration_us * 0.0343) / 2.0;
@@ -173,46 +167,92 @@ impl SystemMonitor {
         channel_config.attenuation = DB_11;
         channel_config.calibration = Calibration::Curve;
 
+        let mut temp_channel = AdcChannelDriver::new(
+            &self.hardware.adc_driver,
+            &mut self.hardware.temp_pin,
+            &channel_config,
+        )?;
+
+        let mut light_channel = AdcChannelDriver::new(
+            &self.hardware.adc_driver,
+            &mut self.hardware.light_pin,
+            &channel_config,
+        )?;
+
         let mut last_send_time = Instant::now();
         let mut shock_detected = false;
-        
+        let mut is_alarm_active = [false; 6];
+
         loop {
             if self.hardware.vibration_pin.is_low() {
                 shock_detected = true;
             }
 
             if last_send_time.elapsed() >= Duration::from_secs(1) {
-
                 // TEMP
-                let raw_temp = {
-                    let mut temp_channel = AdcChannelDriver::new(
-                        &self.hardware.adc_driver,
-                        &mut self.hardware.temp_pin,
-                        &channel_config,
-                    )?;
-                    temp_channel.read()?
-                };
-                let temp_result = self.raw_to_celsius(raw_temp);
-                let temp_celsius: f32 = if temp_result.code == SensorCode::Ok { temp_result.value } else { 0.0 };
+                let raw_temp = temp_channel.read()?;
+                let temp_result = Self::raw_to_celsius(raw_temp);
+                let temp_celsius = if temp_result.code == SensorCode::Ok { temp_result.value } else { 0.0 };
+
 
                 // LIGHT
-                let raw_light = {
-                    let mut light_channel = AdcChannelDriver::new(
-                        &self.hardware.adc_driver,
-                        &mut self.hardware.light_pin,
-                        &channel_config,
-                    )?;
-                    light_channel.read()?
-                };
-                let light_percent = self.raw_to_light(raw_light);
+                let raw_light = light_channel.read()?;
+                let light_percent = Self::raw_to_light(raw_light);
                 let light_percent_val = if light_percent.code == SensorCode::Ok { light_percent.value } else { 0.0 };
+
 
                 // TILT
                 let tilt_status_bool = self.hardware.tilt_pin.is_low();
 
-                // DISTANCE
-                let dist_result = self.measure_distance();
+                let dist_result = {
+                    if self.hardware.trig_pin.set_low().is_err() {
+                        SensorResult::new(0.0, SensorCode::GpioError)
+                    } else {
+                        Ets::delay_us(2);
+                        if self.hardware.trig_pin.set_high().is_err() {
+                            SensorResult::new(0.0, SensorCode::GpioError)
+                        } else {
+                            Ets::delay_us(10);
+                            if self.hardware.trig_pin.set_low().is_err() {
+                                SensorResult::new(0.0, SensorCode::GpioError)
+                            } else {
+                                let wait_time = Instant::now();
+                                let mut timeout_err = false;
+
+                                while self.hardware.echo_pin.is_low() {
+                                    if wait_time.elapsed().as_micros() > 10000 {
+                                        timeout_err = true;
+                                        break;
+                                    }
+                                }
+
+                                if timeout_err {
+                                    SensorResult::new(400.0, SensorCode::HardwareTimeout)
+                                } else {
+                                    let echo_start = Instant::now();
+                                    let mut echo_err = false;
+
+                                    while self.hardware.echo_pin.is_high() {
+                                        // Max 25000us = ~4m range
+                                        if echo_start.elapsed().as_micros() > 25000 {
+                                            echo_err = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if echo_err {
+                                        SensorResult::new(400.0, SensorCode::EchoTimeout)
+                                    } else {
+                                        let duration_us = echo_start.elapsed().as_micros() as f32;
+                                        SensorResult::new((duration_us * 0.0343) / 2.0, SensorCode::Ok)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
                 let distance_cm = if dist_result.code == SensorCode::Ok { dist_result.value } else { -1.0 };
+                println!("[DISTANSE] -> {}cm", distance_cm);
 
                 // Save data to send
                 if let Ok(mut data) = self.shared_data.lock() {
@@ -232,13 +272,36 @@ impl SystemMonitor {
                     tilt_var,
                     vibe_var,
                     distance_cm,
-
                 );
 
-                println!(
-                    "{{\"temp\":{:.2},\"light\":{:.2},\"tilted\":{},\"shock\":{},\"dist\":{:.1}}}",
-                    temp_celsius, light_percent_val, !tilt_status_bool, shock_detected, distance_cm
-                );
+                if let Ok(sensors) = self.db_repository.get_all_sensors() {
+                    for s in sensors {
+                        let id = s.id as usize;
+                        let mut currencly_breached = false;
+
+                        match id {
+                            1 => if temp_celsius <= s.min_threshold || temp_celsius >= s.max_threshold { currencly_breached = true},
+                            2 => if light_percent_val <= s.min_threshold || light_percent_val >= s.max_threshold{ currencly_breached = true },
+                            3 => if !tilt_status_bool { currencly_breached = true },
+                            4 => if shock_detected { currencly_breached = true },
+                            5 => if distance_cm > 0.0 && distance_cm <= s.min_threshold { currencly_breached= true },
+                            _ => {}
+                        }
+
+                        if currencly_breached && !is_alarm_active[id] {
+                            is_alarm_active[id] = true;
+                            let _ = self.db_repository.trigger_alarm(s.id, true);
+                            println!("[ALARM] => Alarm to sensor: {}", s.id);
+                        }
+
+                        else if !currencly_breached && is_alarm_active[id] {
+                            is_alarm_active[id] = false;
+                            let _ = self.db_repository.trigger_alarm(s.id, false);
+                            println!("[ALARM] => Alarm cancelled to sensor: {}", s.id);
+                        }
+                    }
+                }
+
 
                 // Reset counters to 2 sec
                 shock_detected = false;

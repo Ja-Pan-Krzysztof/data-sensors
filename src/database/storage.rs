@@ -1,17 +1,12 @@
 use anyhow::Result;
 
-use std::{fs, env};
-use std::path::Path;
+use std::env;
 use chrono::Utc;
 
 use crate::database::models::*;
 
 
 pub fn init_storage() -> Result<AppDatabase> {
-    // if Path::new(file_path).exists() {
-    //     return Ok(())
-    // }
-    
     let default_db = AppDatabase {
         network: Network {
             ssid: env::var("SSID").unwrap_or_else(|_| "0".to_string()),
@@ -19,18 +14,14 @@ pub fn init_storage() -> Result<AppDatabase> {
             is_active: false,
         },
         sensor: vec![
-            Sensor { id: 1, name: "collision sensor".to_string(), sensor_type: "".to_string(), value: 0.0, min_threshold: 0.0, max_threshold: 0.0, updated: Utc::now() },
-            Sensor { id: 2, name: "light sensor".to_string(), sensor_type: "".to_string(), value: 0.0, min_threshold: 0.0, max_threshold: 0.0, updated: Utc::now() },
-            Sensor { id: 3, name: "tilt sensor".to_string(), sensor_type: "".to_string(), value: 0.0, min_threshold: 0.0, max_threshold: 0.0, updated: Utc::now() },
-            Sensor { id: 4, name: "temp sensor".to_string(), sensor_type: "".to_string(), value: 0.0, min_threshold: 0.0, max_threshold: 0.0, updated: Utc::now() },
-            Sensor { id: 5, name: "shock sensor".to_string(), sensor_type: "".to_string(), value: 0.0, min_threshold: 0.0, max_threshold: 0.0, updated: Utc::now() },
-            Sensor { id: 6, name: "vibration sensor".to_string(), sensor_type: "".to_string(), value: 0.0, min_threshold: 0.0, max_threshold: 0.0, updated: Utc::now() },
+            Sensor { id: 1, name: "Temp sensor".to_string(), sensor_type: "adc".to_string(), value: 0.0, min_threshold: 15.0, max_threshold: 40.0, updated: Utc::now() },
+            Sensor { id: 2, name: "Light sensor".to_string(), sensor_type: "adc".to_string(), value: 0.0, min_threshold: 20.0, max_threshold: 60.0, updated: Utc::now() },
+            Sensor { id: 3, name: "Tilt sensor".to_string(), sensor_type: "digital".to_string(), value: 0.0, min_threshold: 0.0, max_threshold: 1.0, updated: Utc::now() },
+            Sensor { id: 4, name: "Shock sensor".to_string(), sensor_type: "digital".to_string(), value: 0.0, min_threshold: 0.0, max_threshold: 1.0, updated: Utc::now() },
+            Sensor { id: 5, name: "Collision sensor".to_string(), sensor_type: "digital".to_string(), value: 400.0, min_threshold: 30.0, max_threshold: 200.0, updated: Utc::now() },
         ],
         alarm: Vec::new(),
     };
-    //
-    // let serialized = serde_json::to_string_pretty(&default_db)?;
-    // fs::write(file_path, serialized)?;
     
     Ok(default_db)
 }
