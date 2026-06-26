@@ -27,7 +27,7 @@ async function loadHomeData() {
 
             htmlContent += `
                 <tr>
-                    <td class="bold">${s.name}</td>
+                    <td>${s.name}</td>
                     <td>${s.value.toFixed(1)}</td>
                     <td>${s.min_threshold}</td>
                     <td>${s.max_threshold}</td>
@@ -57,7 +57,7 @@ async function loadSettingsData() {
         sensors.forEach(s => {
             htmlContent += `
                 <tr>
-                    <td class="bold">${s.name}</td>
+                    <td>${s.name}</td>
                     <td>${s.min_threshold}</td>
                     <td>${s.max_threshold}</td>
                     <td><input type="number" id="min-in-${s.id}" value="${s.min_threshold}" step="0.1"></td>
@@ -89,7 +89,6 @@ async function saveAllSettings() {
             }
         }
 
-        alert("Saved settings");
         loadSettingsData();
 
     } catch (error) {

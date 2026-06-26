@@ -36,7 +36,7 @@ fn main() -> Result<()> {
         peripherals.pins.gpio16,
         peripherals.pins.gpio17,
     )?;
-    
+
     if let Err(e) = init_storage() {
         println!("[DISK ERROR] -> Unable to init file: {:?}", e)
     }
@@ -66,7 +66,7 @@ fn main() -> Result<()> {
     )?;
 
     let mut monitor = SystemMonitor::new(hardware, shared_data.clone(), db_repository.clone());
-    
+
     thread::Builder::new()
         .name("sensor_monitor_thread".to_string())
         .stack_size(32 * 1024)

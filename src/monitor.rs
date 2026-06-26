@@ -1,6 +1,5 @@
 use anyhow::Result;
 
-use std::thread;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 
@@ -8,9 +7,7 @@ use esp_idf_hal::adc::oneshot::AdcChannelDriver;
 use esp_idf_hal::adc::oneshot::config::{AdcChannelConfig, Calibration};
 use esp_idf_hal::adc::attenuation::DB_11;
 use esp_idf_hal::delay::{Ets, FreeRtos};
-
-use embedded_hal::digital::v2::OutputPin as _;
-
+use esp_idf_hal::gpio::{Input, Output, Pin, PinDriver};
 use crate::config::{SensorsConfig, LiveMeasurements};
 use crate::database::repository::SensorRepository;
 use crate::exceptions::{SensorResult, SensorCode};
@@ -46,13 +43,8 @@ impl SystemMonitor {
     /// # Returns
     /// * (`value` and `status code`)
     fn raw_to_celsius(raw_value: u16) -> SensorResult<f32> {
-        if raw_value >= 4095 {
-            return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh)
-        }
-
-        if raw_value == 0 {
-            return SensorResult::new(raw_value as f32, SensorCode::GpioError)
-        }
+        if raw_value >= 4095 { return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh) }
+        if raw_value == 0 { return SensorResult::new(raw_value as f32, SensorCode::GpioError) }
 
         const SENSITIVITY_B: f32 = 4000.0;
         const ROOM_TEMP_KELVIN: f32 = 298.15;
@@ -62,9 +54,7 @@ impl SystemMonitor {
         let calibration_factor = 13150.0;
         let resistance = calibration_factor * (( 4095.0 - raw) / raw);
 
-        if resistance <= 0.1 {
-            return SensorResult::new(resistance, SensorCode::GpioError)
-        }
+        if resistance <= 0.1 { return SensorResult::new(resistance, SensorCode::GpioError) }
 
         /* Use steinhart equation */
         let mut steinhart = resistance / THERMISTOR_ROOM_RESISTANCE;
@@ -89,13 +79,8 @@ impl SystemMonitor {
         let dark_adc = 150.0;
         let light_adc = 3192.0;
 
-        if (light_adc - dark_adc) < 1.0 {
-            return SensorResult::new(0.0, SensorCode::BadCalibration)
-        }
-
-        if raw_value > 4000 {
-            return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh)
-        }
+        if (light_adc - dark_adc) < 1.0 { return SensorResult::new(0.0, SensorCode::BadCalibration) }
+        if raw_value > 4000 { return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh) }
 
         let mut percentage = ((raw - dark_adc) / (light_adc - dark_adc)) * 100.0;
 
@@ -110,11 +95,11 @@ impl SystemMonitor {
     ///
     /// # Returns
     /// `true` or `false` if detects anything
-    fn is_tilted(&self) -> SensorResult<bool> {
-        let is_tilt = self.hardware.tilt_pin.is_low();
-
-        SensorResult::new(is_tilt, SensorCode::Ok)
-    }
+    // fn is_tilted(&self) -> SensorResult<bool> {
+    //     let is_tilt = self.hardware.tilt_pin.is_low();
+    //
+    //     SensorResult::new(is_tilt, SensorCode::Ok)
+    // }
 
     /// Ultrasonic distance sensor
     /// Measures distance to objects up to 4 metres. Time taken for sound to
@@ -122,44 +107,123 @@ impl SystemMonitor {
     ///
     /// # Returns
     /// `distance` in sentimetres
-    fn measure_distance(&mut self) -> SensorResult<f32> {
+    fn measure_distance<T: Pin, E: Pin>(
+        trig_pin: &mut PinDriver<'_, T, Output>,
+        echo_pin: &PinDriver<'_, E, Input>,
+    ) -> SensorResult<f32> {
         /* Clean area */
-        if self.hardware.trig_pin.set_low().is_err() {
+        if trig_pin.set_low().is_err() {
             return SensorResult::new(0.0, SensorCode::GpioError)
         }
 
         Ets::delay_us(2);
-        if self.hardware.trig_pin.set_high().is_err() {
+        if trig_pin.set_high().is_err() {
             return SensorResult::new(0.0, SensorCode::GpioError)
         }
 
         Ets::delay_us(10);
-        if self.hardware.trig_pin.set_low().is_err() {
+        if trig_pin.set_low().is_err() {
             return SensorResult::new(0.0, SensorCode::GpioError)
         }
 
-        let wait_time = Instant::now();
-        while self.hardware.echo_pin.is_low() {
-            if wait_time.elapsed().as_micros() > 10000 {
-                return SensorResult::new(400.0, SensorCode::HardwareTimeout);
+        let mut timeout = 0;
+        let mut hw_err = false;
+
+        while echo_pin.is_low() {
+            Ets::delay_us(1);
+            timeout += 1;
+            if timeout > 10000 {
+                hw_err = true;
+                break;
             }
         }
 
-        /* Waiting for sound to come back */
-        let echo_start = Instant::now();
-        while self.hardware.echo_pin.is_high() {
-            if echo_start.elapsed().as_micros() > 25000 {
-                return SensorResult::new(400.0, SensorCode::EchoTimeout);
+        if hw_err {
+            SensorResult::new(400.0, SensorCode::HardwareTimeout)
+        } else {
+            let start_time = Instant::now();  // Waiting for sound to come back
+            timeout = 0;
+            let mut echo_err = false;
+
+            while echo_pin.is_high() {
+                Ets::delay_us(1);
+                timeout += 1;
+
+                if timeout > 25000 {  // Max 25000us = 4m range
+                    echo_err = true;
+                    break;
+                }
+            }
+
+            if echo_err {
+                SensorResult::new(400.0, SensorCode::EchoTimeout)
+            } else {
+                let duration_us = start_time.elapsed().as_micros() as f32;  // Duration time
+                let distance_cm = (duration_us * 0.0343) / 2.0;  // Distance
+
+                SensorResult::new(distance_cm, SensorCode::Ok)
             }
         }
+    }
 
-        /* duration time */
-        let duration_us = echo_start.elapsed().as_micros() as f32;
+    ///
+    fn update_shared_state(
+        shared_data: &Arc<Mutex<LiveMeasurements>>,
+        temp: f32, light: f32, tilt: bool, shock: bool, dist: f32,
+    ) {
+        // Save data to send
+        if let Ok(mut data) = shared_data.lock() {
+            data.temperature = temp;
+            data.light_percent = light;
+            data.is_tilted = tilt;
+            data.shock_detected = shock;  // Record shock status for full 2 sescond
+            data.distance_cm = dist;
+        }
+    }
 
-        /* distance */
-        let distance_cm = (duration_us * 0.0343) / 2.0;
+    fn process_db_alarm(
+        db: &Arc<SensorRepository>,
+        temp: f32, light: f32, tilt: bool, shock: bool, dist: f32,
+        is_alarm_active: &mut [bool; 6],
+    ) {
+        let tilt_var: f32 = if tilt { 0.0 } else { 1.0 };
+        let vibe_var: f32 = if shock { 1.0 } else { 0.0 };
 
-        SensorResult::new(distance_cm, SensorCode::Ok)
+        let _ = db.update_all_sensors_batch(
+            temp,
+            light,
+            tilt_var,
+            vibe_var,
+            dist,
+        );
+
+        if let Ok(sensors) = db.get_all_sensors() {
+            for s in sensors {
+                let id = s.id as usize;
+                let mut currencly_breached = false;
+
+                match id {
+                    1 => if temp <= s.min_threshold || temp >= s.max_threshold { currencly_breached = true},
+                    2 => if light <= s.min_threshold || light >= s.max_threshold{ currencly_breached = true },
+                    3 => if !tilt { currencly_breached = true },
+                    4 => if shock { currencly_breached = true },
+                    5 => if dist > 0.0 && (dist <= s.min_threshold || dist >= s.max_threshold) { currencly_breached= true },
+                    _ => {}
+                }
+
+                if currencly_breached && !is_alarm_active[id] {
+                    is_alarm_active[id] = true;
+                    let _ = db.trigger_alarm(s.id, true);
+                    println!("[ALARM] => Alarm triggered for sensor: {}", s.id);
+                }
+
+                else if !currencly_breached && is_alarm_active[id] {
+                    is_alarm_active[id] = false;
+                    let _ = db.trigger_alarm(s.id, false);
+                    println!("[ALARM] => Alarm cancelled for sensor: {}", s.id);
+                }
+            }
+        }
     }
 
     pub fn start_monitor(&mut self) -> Result<()> {
@@ -204,104 +268,24 @@ impl SystemMonitor {
                 // TILT
                 let tilt_status_bool = self.hardware.tilt_pin.is_low();
 
-                let dist_result = {
-                    if self.hardware.trig_pin.set_low().is_err() {
-                        SensorResult::new(0.0, SensorCode::GpioError)
-                    } else {
-                        Ets::delay_us(2);
-                        if self.hardware.trig_pin.set_high().is_err() {
-                            SensorResult::new(0.0, SensorCode::GpioError)
-                        } else {
-                            Ets::delay_us(10);
-                            if self.hardware.trig_pin.set_low().is_err() {
-                                SensorResult::new(0.0, SensorCode::GpioError)
-                            } else {
-                                let wait_time = Instant::now();
-                                let mut timeout_err = false;
-
-                                while self.hardware.echo_pin.is_low() {
-                                    if wait_time.elapsed().as_micros() > 10000 {
-                                        timeout_err = true;
-                                        break;
-                                    }
-                                }
-
-                                if timeout_err {
-                                    SensorResult::new(400.0, SensorCode::HardwareTimeout)
-                                } else {
-                                    let echo_start = Instant::now();
-                                    let mut echo_err = false;
-
-                                    while self.hardware.echo_pin.is_high() {
-                                        // Max 25000us = ~4m range
-                                        if echo_start.elapsed().as_micros() > 25000 {
-                                            echo_err = true;
-                                            break;
-                                        }
-                                    }
-
-                                    if echo_err {
-                                        SensorResult::new(400.0, SensorCode::EchoTimeout)
-                                    } else {
-                                        let duration_us = echo_start.elapsed().as_micros() as f32;
-                                        SensorResult::new((duration_us * 0.0343) / 2.0, SensorCode::Ok)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                };
-                let distance_cm = if dist_result.code == SensorCode::Ok { dist_result.value } else { -1.0 };
-                println!("[DISTANSE] -> {}cm", distance_cm);
-
-                // Save data to send
-                if let Ok(mut data) = self.shared_data.lock() {
-                    data.temperature = temp_celsius;
-                    data.light_percent = light_percent_val;
-                    data.is_tilted = !tilt_status_bool;
-                    data.shock_detected = shock_detected; // Zapisujemy status wstrząsów z całych 2 sekund
-                    data.distance_cm = distance_cm;
-                }
-
-                let tilt_var: f32 = if tilt_status_bool { 0.0 } else { 1.0 };
-                let vibe_var: f32 = if shock_detected { 1.0 } else { 0.0 };
-
-                let _ = self.db_repository.update_all_sensors_batch(
-                    temp_celsius,
-                    light_percent_val,
-                    tilt_var,
-                    vibe_var,
-                    distance_cm,
+                let dist_result = Self::measure_distance(
+                    &mut self.hardware.trig_pin,
+                    &self.hardware.echo_pin,
                 );
 
-                if let Ok(sensors) = self.db_repository.get_all_sensors() {
-                    for s in sensors {
-                        let id = s.id as usize;
-                        let mut currencly_breached = false;
+                let distance_cm = if dist_result.code == SensorCode::Ok { dist_result.value } else { -1.0 };
+                println!("[DISTANSE] -> {:.2}cm", distance_cm);
 
-                        match id {
-                            1 => if temp_celsius <= s.min_threshold || temp_celsius >= s.max_threshold { currencly_breached = true},
-                            2 => if light_percent_val <= s.min_threshold || light_percent_val >= s.max_threshold{ currencly_breached = true },
-                            3 => if !tilt_status_bool { currencly_breached = true },
-                            4 => if shock_detected { currencly_breached = true },
-                            5 => if distance_cm > 0.0 && distance_cm <= s.min_threshold { currencly_breached= true },
-                            _ => {}
-                        }
+                Self::update_shared_state(
+                    &self.shared_data,
+                    temp_celsius, light_percent_val, tilt_status_bool, shock_detected, distance_cm,
+                );
 
-                        if currencly_breached && !is_alarm_active[id] {
-                            is_alarm_active[id] = true;
-                            let _ = self.db_repository.trigger_alarm(s.id, true);
-                            println!("[ALARM] => Alarm to sensor: {}", s.id);
-                        }
-
-                        else if !currencly_breached && is_alarm_active[id] {
-                            is_alarm_active[id] = false;
-                            let _ = self.db_repository.trigger_alarm(s.id, false);
-                            println!("[ALARM] => Alarm cancelled to sensor: {}", s.id);
-                        }
-                    }
-                }
-
+                Self::process_db_alarm(
+                    &self.db_repository,
+                    temp_celsius, light_percent_val, tilt_status_bool, shock_detected, distance_cm,
+                    &mut is_alarm_active,
+                );
 
                 // Reset counters to 2 sec
                 shock_detected = false;

@@ -6,8 +6,7 @@
 
 The project enables the simultaneous, thread-safe reading of data
 from a set of environmental and mechanical sensors, and then
-saves it to a database (`coming soon`) and displays it on the HMI panel
-(`coming soon`).
+saves it to a database (`coming soon, currently in RAM`) and displays it on the HMI panel.
 
 ## 🛠️ Hardware Specifications
 
@@ -31,3 +30,8 @@ saves it to a database (`coming soon`) and displays it on the HMI panel
 
 ## Control Panel
 ![control_panel.png](images/control_panel.png)
+
+---
+
+## Settings Panel
+![settings_panel.png](images/settings_panel.png)
