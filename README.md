@@ -35,3 +35,8 @@ saves it to a database (`coming soon, currently in RAM`) and displays it on the 
 
 ## Settings Panel
 ![settings_panel.png](images/settings_panel.png)
+
+---
+
+## Database records
+![database_recors.png](images/database_records.png)
