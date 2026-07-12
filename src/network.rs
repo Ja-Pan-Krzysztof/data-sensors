@@ -19,7 +19,6 @@ use esp_idf_svc::{
 
 use std::sync::{Arc, Mutex};
 use std::default::Default;
-use serde::Deserialize;
 
 use crate::config::{LiveMeasurements, Screen};
 use crate::database::repository::SensorRepository;
@@ -28,12 +27,12 @@ pub type Wifi = BlockingWifi<EspWifi<'static>>;
 pub type Server = EspHttpServer<'static>;
 
 
-#[derive(Deserialize)]
-pub struct SettingsUpdate {
-    pub sensor_id: i32,
-    pub min_val: f32,
-    pub max_val: f32
-}
+// #[derive(Deserialize)]
+// pub struct SettingsUpdate {
+//     pub sensor_id: i32,
+//     pub min_val: f32,
+//     pub max_val: f32
+// }
 
 
 pub fn run_server(

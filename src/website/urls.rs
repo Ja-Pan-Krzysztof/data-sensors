@@ -9,7 +9,6 @@ use esp_idf_svc::http::Method;
 
 use crate::config::LiveMeasurements;
 use crate::database::repository::SensorRepository;
-use crate::network::SettingsUpdate;
 
 const HOME: &str = include_str!("../../templates/home.html");
 const SETTINGS: &str = include_str!("../../templates/settings.html");
@@ -18,7 +17,7 @@ const SCRIPT: &str = include_str!("../../scripts/script.js");
 
 pub fn load_urls(
     http: &mut EspHttpServer,
-    shared_data: Arc<Mutex<LiveMeasurements>>,
+    _shared_data: Arc<Mutex<LiveMeasurements>>,
     db_repository: Arc<SensorRepository>
 ) -> Result<()> {
     http.fn_handler("/styles/style.css", Method::Get, move |request| -> Result<()> {

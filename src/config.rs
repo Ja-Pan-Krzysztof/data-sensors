@@ -9,7 +9,7 @@ use display_interface_spi::SPIInterface;
 use esp_idf_hal::units::Hertz;
 
 use crate::oled::OledDisplay;
-use crate::exceptions::OledErorr;
+use crate::exceptions::SensorCode;
 
 
 /// Assigning pins to specyfic sensors
@@ -105,6 +105,13 @@ pub struct LiveMeasurements {
     pub is_tilted: bool,
     pub shock_detected: bool,
     pub distance_cm: f32,
+
+    // Error code
+    pub err_temp: SensorCode,
+    pub err_light: SensorCode,
+    pub err_tilt: SensorCode,
+    pub err_shock: SensorCode,
+    pub err_dist: SensorCode,
 }
 
 impl Default for LiveMeasurements {
@@ -115,6 +122,13 @@ impl Default for LiveMeasurements {
             is_tilted: false,
             shock_detected: false,
             distance_cm: -1.0,
+
+            // Error code
+            err_temp: SensorCode::Ok,
+            err_light: SensorCode::Ok,
+            err_tilt: SensorCode::Ok,
+            err_shock: SensorCode::Ok,
+            err_dist: SensorCode::Ok,
         }
     }
 }

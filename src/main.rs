@@ -16,10 +16,11 @@ use anyhow::Result;
 use esp_idf_hal::prelude::Peripherals;
 
 use crate::config::{LiveMeasurements, Screen, SensorsConfig};
-use crate::database::models::{AppDatabase, Sensor};
 use crate::database::repository::SensorRepository;
 use crate::database::storage::init_storage;
 use crate::monitor::SystemMonitor;
+use crate::exceptions::SensorCode;
+
 
 fn main() -> Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
@@ -77,15 +78,61 @@ fn main() -> Result<()> {
     })
         .expect("[MONITOR ERROR] -> Unable to create monitor thread");
 
+    let loop_delay = Duration::from_millis(200);
+
     loop {
+        let (temp, light, tilt, shock, dist, err_temp, err_light, err_dist) = {
+            if let Ok(data) = shared_data.lock() {
+                (
+                    data.temperature,
+                    data.light_percent,
+                    data.is_tilted,
+                    data.shock_detected,
+                    data.distance_cm,
+                    data.err_temp,
+                    data.err_light,
+                    data.err_dist,
+                )
+            } else {
+                (0.0, 0.0, false, false, 0.0, SensorCode::Ok, SensorCode::Ok, SensorCode::Ok)
+            }
+        };
+
         if let Ok(mut display) = shared_oled.lock() {
             if let Err(e) = display.clear() { println!("[OLED ERROR] -> Clean failed: {:?}", e); }
             if let Err(e) = display.show_text(&format!("{:?}", wifi.wifi().sta_netif().get_ip_info()?.ip), 5, 10) { println!("[OLED ERROR] -> Draw failed: {:?}", e); }
+
+            let txt_temp = if err_temp == SensorCode::Ok {
+                format!("Temp: {:.1}C", temp)
+            } else {
+                format!("S1: {:?}", err_temp)
+            };
+            let _ = display.show_text(&txt_temp, 5, 22);
+
+            let txt_light = if err_light == SensorCode::Ok {
+                format!("Light: {:.0}%", light)
+            } else {
+                format!("S2: {:?}", err_light)
+            };
+            let _ = display.show_text(&txt_light, 5, 34);
+
+            let txt_dist = if err_dist == SensorCode::Ok {
+                format!("Dist: {:.1}cm", dist)
+            } else {
+                format!("S5: {:?}", err_dist)
+            };
+            let _ = display.show_text(&txt_dist, 5, 46);
+
+            let t_str = if tilt { "YES" } else { "NO" };
+            let s_str = if shock { "YES" } else { "NO" };
+            let txt_motion = format!("TILT:{} SHK:{}", t_str, s_str);
+            let _ = display.show_text(&txt_motion, 5, 58);
+
             if let Err(e) = display.refresh() { println!("[OLED ERROR] -> Refresh failed: {:?}", e); }
         } else {
             println!("[ERROR] -> Mutex cannot lock screen")
         }
 
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(loop_delay);
     }
 }

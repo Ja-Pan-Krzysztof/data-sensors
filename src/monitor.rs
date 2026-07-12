@@ -2,7 +2,6 @@ use anyhow::Result;
 
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
-
 use esp_idf_hal::adc::oneshot::AdcChannelDriver;
 use esp_idf_hal::adc::oneshot::config::{AdcChannelConfig, Calibration};
 use esp_idf_hal::adc::attenuation::DB_11;
@@ -43,8 +42,8 @@ impl SystemMonitor {
     /// # Returns
     /// * (`value` and `status code`)
     fn raw_to_celsius(raw_value: u16) -> SensorResult<f32> {
-        if raw_value >= 4095 { return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh) }
-        if raw_value == 0 { return SensorResult::new(raw_value as f32, SensorCode::GpioError) }
+        if raw_value >= 4050 { return SensorResult::new(-999.9, SensorCode::VoltageToHigh) }
+        if raw_value <= 40 { return SensorResult::new(-999.9, SensorCode::GpioError) }
 
         const SENSITIVITY_B: f32 = 4000.0;
         const ROOM_TEMP_KELVIN: f32 = 298.15;
@@ -75,13 +74,14 @@ impl SystemMonitor {
     /// # Returns
     /// (`percentage` and `status code`)
     fn raw_to_light(raw_value: u16) -> SensorResult<f32> {
-        let raw = raw_value as f32;
         let dark_adc = 150.0;
         let light_adc = 3192.0;
 
-        if (light_adc - dark_adc) < 1.0 { return SensorResult::new(0.0, SensorCode::BadCalibration) }
-        if raw_value > 4000 { return SensorResult::new(raw_value as f32, SensorCode::VoltageToHigh) }
+        if raw_value >= 4050 { return SensorResult::new(-1.0, SensorCode::VoltageToHigh) }
+        if raw_value <= 40 { return SensorResult::new(-1.0, SensorCode::GpioError) }
+        if (light_adc - dark_adc) < 1.0 { return SensorResult::new(-1.0, SensorCode::BadCalibration) }
 
+        let raw = raw_value as f32;
         let mut percentage = ((raw - dark_adc) / (light_adc - dark_adc)) * 100.0;
 
         if percentage > 100.0 { percentage = 100.0; }
@@ -126,58 +126,60 @@ impl SystemMonitor {
             return SensorResult::new(0.0, SensorCode::GpioError)
         }
 
-        let mut timeout = 0;
-        let mut hw_err = false;
-
+        let mut watchdog_counter = 0;
         while echo_pin.is_low() {
-            Ets::delay_us(1);
-            timeout += 1;
-            if timeout > 10000 {
-                hw_err = true;
-                break;
+            watchdog_counter += 1;
+
+            if watchdog_counter > 5000 {
+                return SensorResult::new(-1.0, SensorCode::HardwareTimeout);
             }
+            Ets::delay_us(1);
         }
 
-        if hw_err {
-            SensorResult::new(400.0, SensorCode::HardwareTimeout)
+        let echo_start = Instant::now();
+        let mut echo_timeout_counter = 0;
+
+        while echo_pin.is_high() {
+            echo_timeout_counter += 1;
+
+            if echo_timeout_counter > 35000 {
+                return SensorResult::new(-1.0, SensorCode::EchoTimeout);
+            }
+            Ets::delay_us(1);
+        }
+
+        let duration_us = echo_start.elapsed().as_micros() as f32;
+
+        if duration_us > 24000.0 || duration_us < 150.0 {
+            SensorResult::new(-1.0, SensorCode::EchoTimeout)
         } else {
-            let start_time = Instant::now();  // Waiting for sound to come back
-            timeout = 0;
-            let mut echo_err = false;
+            let distance_cm = (duration_us * 0.0343) / 2.0;
 
-            while echo_pin.is_high() {
-                Ets::delay_us(1);
-                timeout += 1;
-
-                if timeout > 25000 {  // Max 25000us = 4m range
-                    echo_err = true;
-                    break;
-                }
-            }
-
-            if echo_err {
-                SensorResult::new(400.0, SensorCode::EchoTimeout)
-            } else {
-                let duration_us = start_time.elapsed().as_micros() as f32;  // Duration time
-                let distance_cm = (duration_us * 0.0343) / 2.0;  // Distance
-
-                SensorResult::new(distance_cm, SensorCode::Ok)
-            }
+            SensorResult::new(distance_cm, SensorCode::Ok)
         }
     }
 
     ///
     fn update_shared_state(
         shared_data: &Arc<Mutex<LiveMeasurements>>,
-        temp: f32, light: f32, tilt: bool, shock: bool, dist: f32,
+        temp: SensorResult<f32>, light: SensorResult<f32>, tilt: bool, shock: bool, dist: SensorResult<f32>,
     ) {
         // Save data to send
         if let Ok(mut data) = shared_data.lock() {
-            data.temperature = temp;
-            data.light_percent = light;
+            data.temperature = temp.value;
+            data.err_temp = temp.code;
+
+            data.light_percent = light.value;
+            data.err_light = light.code;
+
             data.is_tilted = tilt;
+            data.err_tilt = SensorCode::Ok;
+
             data.shock_detected = shock;  // Record shock status for full 2 sescond
-            data.distance_cm = dist;
+            data.err_shock = SensorCode::Ok;
+
+            data.distance_cm = dist.value;
+            data.err_dist = dist.code;
         }
     }
 
@@ -254,37 +256,45 @@ impl SystemMonitor {
 
             if last_send_time.elapsed() >= Duration::from_secs(1) {
                 // TEMP
-                let raw_temp = temp_channel.read()?;
-                let temp_result = Self::raw_to_celsius(raw_temp);
-                let temp_celsius = if temp_result.code == SensorCode::Ok { temp_result.value } else { 0.0 };
-
+                let temp_result = match temp_channel.read() {
+                    Ok(raw) => Self::raw_to_celsius(raw),
+                    Err(_) => SensorResult::new(-999.9, SensorCode::GpioError),
+                };
 
                 // LIGHT
-                let raw_light = light_channel.read()?;
-                let light_percent = Self::raw_to_light(raw_light);
-                let light_percent_val = if light_percent.code == SensorCode::Ok { light_percent.value } else { 0.0 };
-
+                let light_result = match light_channel.read() {
+                    Ok(raw) => Self::raw_to_light(raw),
+                    Err(_) => SensorResult::new(-1.0, SensorCode::GpioError),
+                };
 
                 // TILT
                 let tilt_status_bool = self.hardware.tilt_pin.is_low();
 
+                // DISTANCE
                 let dist_result = Self::measure_distance(
                     &mut self.hardware.trig_pin,
                     &self.hardware.echo_pin,
                 );
 
-                let distance_cm = if dist_result.code == SensorCode::Ok { dist_result.value } else { -1.0 };
-                println!("[DISTANSE] -> {:.2}cm", distance_cm);
-
                 Self::update_shared_state(
                     &self.shared_data,
-                    temp_celsius, light_percent_val, tilt_status_bool, shock_detected, distance_cm,
+                    temp_result, light_result, tilt_status_bool, shock_detected, dist_result,
                 );
+
+                let temp_val = temp_result.value;
+                let light_val = light_result.value;
+                let dist_val = dist_result.value;
 
                 Self::process_db_alarm(
                     &self.db_repository,
-                    temp_celsius, light_percent_val, tilt_status_bool, shock_detected, distance_cm,
+                    temp_val, light_val, tilt_status_bool, shock_detected, dist_val,
                     &mut is_alarm_active,
+                );
+
+                // Loging to python
+                println!(
+                    "{{\"temp\":{:.2},\"light\":{:.2},\"tilted\":{},\"shock\":{},\"dist\":{:.1}}}",
+                    temp_val, light_val, !tilt_status_bool, shock_detected, dist_val
                 );
 
                 // Reset counters to 2 sec

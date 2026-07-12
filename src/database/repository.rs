@@ -1,10 +1,9 @@
-use std::fs;
 use std::sync::Mutex;
 
-use anyhow::{anyhow, Result, Context};
+use anyhow::{anyhow, Result};
 use chrono::Utc;
 
-use crate::database::models::{Alarm, AppDatabase, Sensor, Network};
+use crate::database::models::{Alarm, AppDatabase, Sensor};
 
 
 pub struct SensorRepository {
@@ -33,26 +32,11 @@ impl SensorRepository {
         Ok(())
     }
 
-    //
-
     /// Get list of all sensors
     pub fn get_all_sensors(&self) -> Result<Vec<Sensor>> {
         let db = self.load_db()?;
 
         Ok(db.sensor)
-    }
-
-    /// Save new actual value to database
-    pub fn update_sensor_value(&self, sensor_id: i32, new_value: f32) -> Result<()> {
-        let mut db = self.load_db()?;
-
-        if let Some(i) = db.sensor.iter_mut().find(|i| i.id == sensor_id) {
-            i.value = new_value;
-            i.updated = Utc::now();
-            self.save_db(&db)?;
-        }
-
-        Ok(())
     }
 
     /// Save new min and max value to sensor
@@ -69,8 +53,6 @@ impl SensorRepository {
 
         Ok(())
     }
-
-    //
 
     pub fn trigger_alarm(&self, sensor_id: i32, is_triggered: bool) -> Result<()> {
         let mut db = self.load_db()?;
@@ -91,14 +73,26 @@ impl SensorRepository {
         Ok(())
     }
 
+    /*
+    /// Save new actual value to database
+    pub fn update_sensor_value(&self, sensor_id: i32, new_value: f32) -> Result<()> {
+        let mut db = self.load_db()?;
+
+        if let Some(i) = db.sensor.iter_mut().find(|i| i.id == sensor_id) {
+            i.value = new_value;
+            i.updated = Utc::now();
+            self.save_db(&db)?;
+        }
+
+        Ok(())
+    }
+
     /// Get list of alarms
     pub fn get_alarm_history(&self) -> Result<Vec<Alarm>> {
         let db = self.load_db()?;
 
         Ok(db.alarm)
     }
-
-    //
 
     /// Get network config
     pub fn get_network_config(&self) -> Result<Network> {
@@ -114,6 +108,7 @@ impl SensorRepository {
         self.save_db(&db)?;
         Ok(())
     }
+     */
 
     pub fn update_all_sensors_batch(
         &self,
