@@ -14,6 +14,8 @@ use std::env;
 use anyhow::Result;
 
 use esp_idf_hal::prelude::Peripherals;
+use esp_idf_hal::uart::{UartConfig, UartDriver, config::DataBits, config::StopBits};
+use esp_idf_hal::prelude::FromValueType;
 
 use crate::config::{LiveMeasurements, Screen, SensorsConfig};
 use crate::database::repository::SensorRepository;
@@ -66,7 +68,26 @@ fn main() -> Result<()> {
         db_repository.clone(),
     )?;
 
-    let mut monitor = SystemMonitor::new(hardware, shared_data.clone(), db_repository.clone());
+    let uart_config = UartConfig::new()
+        .baudrate(115_200_u32.Hz())
+        .data_bits(DataBits::DataBits8)
+        .stop_bits(StopBits::STOP1);
+
+    let uart = UartDriver::new(
+        peripherals.uart0,
+        peripherals.pins.gpio43,
+        peripherals.pins.gpio44,
+        Option::<esp_idf_hal::gpio::AnyInputPin>::None,
+        Option::<esp_idf_hal::gpio::AnyOutputPin>::None,
+        &uart_config,
+    )?;
+
+    let mut monitor = SystemMonitor::new(
+        hardware,
+        shared_data.clone(),
+        db_repository.clone(),
+        uart,
+    );
 
     thread::Builder::new()
         .name("sensor_monitor_thread".to_string())

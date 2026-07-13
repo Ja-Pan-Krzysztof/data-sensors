@@ -7,15 +7,18 @@ use esp_idf_hal::adc::oneshot::config::{AdcChannelConfig, Calibration};
 use esp_idf_hal::adc::attenuation::DB_11;
 use esp_idf_hal::delay::{Ets, FreeRtos};
 use esp_idf_hal::gpio::{Input, Output, Pin, PinDriver};
+use esp_idf_hal::uart::UartDriver;
+
 use crate::config::{SensorsConfig, LiveMeasurements};
 use crate::database::repository::SensorRepository;
 use crate::exceptions::{SensorResult, SensorCode};
 
 
-pub struct SystemMonitor {
+pub struct SystemMonitor<'a> {
     hardware: SensorsConfig,
     shared_data: Arc<Mutex<LiveMeasurements>>,
     db_repository: Arc<SensorRepository>,
+    uart_driver: UartDriver<'a>,
 }
 
 impl<T> SensorResult<T> {
@@ -24,13 +27,14 @@ impl<T> SensorResult<T> {
     }
 }
 
-impl SystemMonitor {
+impl<'a> SystemMonitor<'a> {
     pub fn new(
         hardware: SensorsConfig,
         shared_data: Arc<Mutex<LiveMeasurements>>,
         db_repository: Arc<SensorRepository>,
+        uart_driver: UartDriver<'a>
     ) -> Self {
-        Self { hardware, shared_data, db_repository }
+        Self { hardware, shared_data, db_repository, uart_driver }
     }
 
     /// Temperature sensos
@@ -216,13 +220,13 @@ impl SystemMonitor {
                 if currencly_breached && !is_alarm_active[id] {
                     is_alarm_active[id] = true;
                     let _ = db.trigger_alarm(s.id, true);
-                    println!("[ALARM] => Alarm triggered for sensor: {}", s.id);
+                    // println!("[ALARM] => Alarm triggered for sensor: {}", s.id);
                 }
 
                 else if !currencly_breached && is_alarm_active[id] {
                     is_alarm_active[id] = false;
                     let _ = db.trigger_alarm(s.id, false);
-                    println!("[ALARM] => Alarm cancelled for sensor: {}", s.id);
+                    // println!("[ALARM] => Alarm cancelled for sensor: {}", s.id);
                 }
             }
         }
@@ -278,7 +282,7 @@ impl SystemMonitor {
 
                 Self::update_shared_state(
                     &self.shared_data,
-                    temp_result, light_result, tilt_status_bool, shock_detected, dist_result,
+                    temp_result, light_result, !tilt_status_bool, shock_detected, dist_result,
                 );
 
                 let temp_val = temp_result.value;
@@ -292,10 +296,29 @@ impl SystemMonitor {
                 );
 
                 // Loging to python
-                println!(
-                    "{{\"temp\":{:.2},\"light\":{:.2},\"tilted\":{},\"shock\":{},\"dist\":{:.1}}}",
-                    temp_val, light_val, !tilt_status_bool, shock_detected, dist_val
-                );
+                // println!(
+                //     "{{\"temp\":{:.2},\"light\":{:.2},\"tilted\":{},\"shock\":{},\"dist\":{:.1}}}",
+                //     temp_val, light_val, !tilt_status_bool, shock_detected, dist_val
+                // );
+
+                let mut packet = [0u8; 14];
+
+                packet[0..4].copy_from_slice(&temp_val.to_le_bytes());
+                packet[4..8].copy_from_slice(&light_val.to_le_bytes());
+
+                packet[8] = (tilt_status_bool as u8) | ((shock_detected as u8) << 1);
+
+                let mut alarm_mask = 0u8;
+                if is_alarm_active[1] { alarm_mask |= 1 << 0; }
+                if is_alarm_active[2] { alarm_mask |= 1 << 1; }
+                if is_alarm_active[3] { alarm_mask |= 1 << 2; }
+                if is_alarm_active[4] { alarm_mask |= 1 << 3; }
+                if is_alarm_active[5] { alarm_mask |= 1 << 4; }
+                packet[9] = alarm_mask;
+
+                packet[10..14].copy_from_slice(&dist_val.to_le_bytes());
+
+                let _ = self.uart_driver.write(&packet);
 
                 // Reset counters to 2 sec
                 shock_detected = false;

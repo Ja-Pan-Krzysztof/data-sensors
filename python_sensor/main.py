@@ -61,11 +61,20 @@ if __name__ == '__main__':
     data_menager = SensorDataBuffer(session_factory=SessionLocal)
 
     with serial.Serial(PORT, BAUD_RATE, timeout=1) as ser:
-        while True:
-            p = read_sensor(ser)
+        try:
+            while True:
+                p = read_sensor(ser)
 
-            if p:
-                print(p)
-                data_menager.add_reading(p)
+                if p:
+                    alarms: dict = p['alarms']
+                    active_alarms = [i.upper() for i, active in alarms.items() if active]
 
-            time.sleep(0.01)
+                    print(f'[ALARM ACTIVE] -> Breached thresholds: {", ".join(active_alarms)}')
+                    print(f"[SYSTEM OK] Temp: {p['temp']:.2f}°C | Light: {p['light']:.1f}% | Dist: {p['dist']:.1f}cm")
+
+                    data_menager.add_reading(p)
+
+                time.sleep(0.01)
+
+        except KeyboardInterrupt:
+            print('STOP')
