@@ -28,6 +28,15 @@ saves it to a database (`coming soon, currently in RAM`) and displays it on the 
 | **Ekran OLED SSD1306**                   | DC             | **GPIO 16** | Digital Output (Data/Command) |
 | **Ekran OLED SSD1306**                   | RES            | **GPIO 17** | Digital Output (Reset)        |
 
+## 🚂 Communication ESP32 ⇆ Python
+
+Communication takes place via the **UART** interface using a fixed-lenght
+binary protocol, avoiding heavier formats such as **JSON** or **CSV**.
+This eliminates parsing overhead and ensures highly zero-copy data 
+transmission.
+
+
+
 ## Control Panel
 ![control_panel.png](images/control_panel.png)
 
